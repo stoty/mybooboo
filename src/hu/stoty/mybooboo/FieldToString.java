@@ -64,15 +64,15 @@ public class FieldToString {
 		case TIME:
 			return timeToString(data);
 		case TIME_V2:
-			return timeMsToString(data);
+			return timeToString(data);
 		case TIMESTAMP:
 			return dateTimeToString(data);
 		case TIMESTAMP_V2:
-			return dateTimeMsToString(data);
+			return timestampMsToString(data);
 		case DATETIME:
 			return dateTimeToString(data);
 		case DATETIME_V2:
-			return dateTimeMsToString(data);
+			return dateTimeToString(data);
 		case YEAR:
 			return intToString(data);
 		case STRING:
@@ -129,28 +129,19 @@ public class FieldToString {
 	}
 
 	protected static String timeToString(Serializable in) {
-		Long unixTime = (Long) in;
-		return timeFormat.format(new Time(unixTime));
-	}
-
-	protected static String timeMsToString(Serializable in) {
-		Long unixTime = (Long) in;
-		return timeFormatMs.format(new Time(unixTime));
+		return "'"+timeFormatMs.format((java.sql.Time) in)+"'";
 	}
 
 	protected static String dateToString(Serializable in) {
-		Long unixTime = (Long) in;
-		return dateFormat.format(new Date(unixTime));
+		return "'"+dateFormat.format((java.sql.Date) in)+"'";
 	}
 
 	protected static String dateTimeToString(Serializable in) {
-		Long unixTime = (Long) in;
-		return dateTimeFormat.format(new Timestamp(unixTime));
+		return "'"+dateTimeFormat.format((java.util.Date) in)+"'";
 	}
 
-	protected static String dateTimeMsToString(Serializable in) {
-		Long unixTime = (Long) in;
-		return dateTimeFormatMs.format(new Timestamp(unixTime));
+	protected static String timestampMsToString(Serializable in) {
+		return "'"+dateTimeFormatMs.format((java.sql.Timestamp) in)+"'";
 	}
 
 	protected static String blobToString(Serializable in) {

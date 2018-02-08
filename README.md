@@ -1,6 +1,6 @@
 # MyBooBoo
 
-This program is meant to help recover from inadvertent destructive updates on a mysql based database.
+This program is meant to help recover from inadvertent destructive updates or deletes on a mysql based database.
 
 This program MAY help you, if you have row based binary logging enabled on your database, 
 and have the log file that contains inadvertent update.
@@ -12,14 +12,17 @@ This is experimental code, extremely lightly tested, and is likely to have serio
 
 ### BUILDING:
 The heavy lifting is done by the `mysql-binlog-connector-java` library that parses the binlog file.
-You need to download and build that first, from one these sources:
+You need to download and build that first.
 
-* https://github.com/wenerme/mysql-binlog-connector-java (MariaDB compatible, somewhat tested with MyBooBoo)
-* https://github.com/shyiko/mysql-binlog-connector-java (upstream version, MySql only, not tested with MyBooBoo)
+* https://github.com/shyiko/mysql-binlog-connector-java (upstream version, MySql only)
+
+If you use MariaDB, you may need to one of its forks with MariaDB support.
 
 You need to copy the resulting jar to the `lib/` directory.
 
 Run `build.sh`. This will generate the class files under the bin directory.
+
+If you use Mysql 5.6+, and get mysterious errors while parsing the binlog file, add the -Dcrc=true paramater to mybooboo.sh
 
 ### USING:
 This program takes a binlog file and a binlog position as input, and outputs an sql script 

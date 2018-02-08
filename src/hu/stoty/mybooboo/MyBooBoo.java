@@ -1,5 +1,15 @@
 package hu.stoty.mybooboo;
 
+import com.github.shyiko.mysql.binlog.BinaryLogFileReader;
+import com.github.shyiko.mysql.binlog.event.DeleteRowsEventData;
+import com.github.shyiko.mysql.binlog.event.Event;
+import com.github.shyiko.mysql.binlog.event.EventHeaderV4;
+import com.github.shyiko.mysql.binlog.event.EventType;
+import com.github.shyiko.mysql.binlog.event.TableMapEventData;
+import com.github.shyiko.mysql.binlog.event.UpdateRowsEventData;
+import com.github.shyiko.mysql.binlog.event.deserialization.ChecksumType;
+import com.github.shyiko.mysql.binlog.event.deserialization.EventDeserializer;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -7,13 +17,6 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map.Entry;
-
-import com.github.shyiko.mysql.binlog.BinaryLogFileReader;
-import com.github.shyiko.mysql.binlog.event.Event;
-import com.github.shyiko.mysql.binlog.event.EventHeaderV4;
-import com.github.shyiko.mysql.binlog.event.EventType;
-import com.github.shyiko.mysql.binlog.event.TableMapEventData;
-import com.github.shyiko.mysql.binlog.event.UpdateRowsEventData;
 
 /**
  * Reads Mysql/MariaDB row based binary log file, and attemptes to create an SQLscript that reverts an update statement in it.
@@ -32,7 +35,10 @@ public class MyBooBoo {
 	public static void main(String[] args) throws IOException {
 		
 		long lastPos;
+		
 		boolean debug = false;
+		boolean crc = false;
+		
 		BinaryLogFileReader reader;
 		HashMap<Long, TableMapEventData> tableMap = new HashMap<>();
 		
@@ -44,6 +50,10 @@ public class MyBooBoo {
 			FieldToString.setHexEncodeString(false);
 		}
 		
+		if(System.getProperty("crc", null)!=null){
+			crc = true;;
+		}
+		
 		try{
 			if(args.length != 2){
 				throw new Exception("Needs 2 arguments");
@@ -51,7 +61,14 @@ public class MyBooBoo {
 			
 			lastPos = Integer.parseInt(args[1]);
 			File f = new File(args[0]);
-			reader = new BinaryLogFileReader(f);
+			
+			//CRC handling
+			EventDeserializer eventDeserializer = new EventDeserializer();
+			if (crc) {
+				eventDeserializer.setChecksumType(ChecksumType.CRC32);
+			}
+			
+			reader = new BinaryLogFileReader(f, eventDeserializer);
 					
 			Event event;
 			while((event = reader.readEvent()) != null){
@@ -77,9 +94,17 @@ public class MyBooBoo {
 						System.err.println("UpdateRowsEventData found");
 					}
 					reverseUpdate(System.out, tableMap, updateData);
+				} else if(event.getHeader().getEventType() == EventType.DELETE_ROWS || event.getHeader().getEventType() == EventType.EXT_DELETE_ROWS){
+					DeleteRowsEventData deleteData = (DeleteRowsEventData) (event.getData());
+					if(debug){
+						System.err.println("DeleteRowsEventData found");
+					}
+					reverseDelete(System.out, tableMap, deleteData);
 				} else if(event.getHeader().getEventType() == EventType.XID){
 					break;
 				}
+				//Maybe handle INSERTs some day ?
+			
 			}
 		} catch (Exception e){
 			printUsage(e);
@@ -91,11 +116,54 @@ public class MyBooBoo {
 		return input.replaceAll("'", "''");
 	}
 	
+	private static void reverseDelete(PrintStream out, HashMap<Long, TableMapEventData> tableMap, DeleteRowsEventData deleteData) throws IOException{
+		
+		long tableId = deleteData.getTableId();
+		TableMapEventData tableData = tableMap.get(tableId);
+		
+		int lastColumnIndex = deleteData.getIncludedColumns().length();
+
+		
+		//create and fill in the column name variables
+		String schemaName = tableData.getDatabase();
+		String tableName = tableData.getTable();
+		
+		for(int position = 0; position < lastColumnIndex; position++){
+			out.println("SELECT COLUMN_NAME INTO @"+tableName+"_"+position+" FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='"+schemaName+"' AND TABLE_NAME='"+tableName+"' and ordinal_position="+(position+1)+";");
+		}
+		
+		//create the insert statements
+		for(Serializable[] record : deleteData.getRows() ){
+			
+			ArrayList<String> prep = new  ArrayList<>();
+			
+			prep.add("'INSERT INTO "+tableData.getTable()+" SET '\n");
+			boolean first=true;
+			for(int pos=0; pos<deleteData.getIncludedColumns().length(); pos++){
+				if(!deleteData.getIncludedColumns().get(pos)){
+					continue;
+				}
+				if(!first){
+					prep.add("' , '");
+				}
+				first = false;
+				prep.add("@"+tableName+"_"+pos);
+				prep.add("'=" + esacapeApostrophe(FieldToString.fieldToString(record[pos], tableData.getColumnTypes()[pos]))+"'\n");
+			}
+			
+			prep.add("';'");
+			
+			out.print("SET @INSERT_STMT = concat("+String.join(",", prep)+");\n");
+			out.print("PREPARE PREPARED_INSERT FROM @INSERT_STMT;\n");
+			out.print("EXECUTE PREPARED_INSERT;\n");
+			out.print("DEALLOCATE PREPARE PREPARED_INSERT;\n\n");
+		}
+	}
+	
 	private static void reverseUpdate(PrintStream out, HashMap<Long, TableMapEventData> tableMap, UpdateRowsEventData updateData) throws IOException{
 		
 		long tableId = updateData.getTableId();
 		TableMapEventData tableData = tableMap.get(tableId);
-
 		
 		int lastColumnIndex=Math.max(updateData.getIncludedColumnsBeforeUpdate().length(), updateData.getIncludedColumns().length());
 
